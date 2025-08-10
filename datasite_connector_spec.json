@@ -1,0 +1,196 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "DataSite Connector",
+    "description": "Access to private DataSite content with encrypted proprietary essays and documents",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://b4999221839d.ngrok-free.app",
+      "description": "DataSite API Server"
+    }
+  ],
+  "paths": {
+    "/datasets": {
+      "get": {
+        "summary": "List available datasets",
+        "description": "Get a list of all datasets available in the private datasite",
+        "parameters": [
+          {
+            "name": "tags",
+            "in": "query",
+            "description": "Filter datasets by tags (comma-separated)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "content_type",
+            "in": "query",
+            "description": "Filter by content type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of available datasets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "datasets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {"type": "string"},
+                              "description": {"type": "string"},
+                              "content_type": {"type": "string"},
+                              "size": {"type": "integer"},
+                              "tags": {"type": "array", "items": {"type": "string"}},
+                              "created_at": {"type": "string"}
+                            }
+                          }
+                        },
+                        "total_count": {"type": "integer"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/content": {
+      "post": {
+        "summary": "Get content from dataset",
+        "description": "Retrieve content from a specific dataset in the datasite",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "dataset_name": {
+                    "type": "string",
+                    "description": "Name of the dataset to retrieve"
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": ["raw", "summary", "metadata"],
+                    "description": "Format of the returned content",
+                    "default": "raw"
+                  }
+                },
+                "required": ["dataset_name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dataset content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "content": {"type": "string"},
+                        "size": {"type": "integer"},
+                        "format": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "summary": "Search content",
+        "description": "Search for content across all datasets in the datasite",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Search query"
+                  },
+                  "max_results": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "Maximum number of results",
+                    "default": 10
+                  }
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "results": {"type": "array"},
+                        "query": {"type": "string"},
+                        "result_count": {"type": "integer"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "ngrok-skip-browser-warning"
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ]
+}

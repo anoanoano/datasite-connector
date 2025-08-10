@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "datasite-connector": {
+      "command": "python",
+      "args": ["/Users/matthewprewitt/datasite-connector/start_mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/Users/matthewprewitt/datasite-connector",
+        "VIRTUAL_ENV": "/Users/matthewprewitt/datasite-connector/venv"
+      }
+    }
+  }
+}

@@ -3,7 +3,10 @@
     "allow": [
       "Bash(mkdir:*)",
       "Bash(mv:*)",
-      "WebFetch(domain:syftbox-documentation.openmined.org)"
+      "WebFetch(domain:syftbox-documentation.openmined.org)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:support.anthropic.com)",
+      "WebFetch(domain:modelcontextprotocol.io)"
     ],
     "deny": []
   }

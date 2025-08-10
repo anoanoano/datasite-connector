@@ -84,4 +84,11 @@ class Config(BaseSettings):
         ]
         
         for directory in directories:
-            directory.mkdir(parents=True, exist_ok=True)
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                # If directory exists but we can't create it (read-only), that's okay
+                if directory.exists():
+                    continue
+                else:
+                    raise e

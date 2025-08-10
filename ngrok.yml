@@ -1,0 +1,8 @@
+version: 2
+tunnels:
+  api-server:
+    proto: http
+    addr: 8080
+  mcp-server:
+    proto: http
+    addr: 8081
