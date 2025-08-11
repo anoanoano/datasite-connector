@@ -1,0 +1,98 @@
+name: datasite-connector-mcp
+version: 1.0.0
+description: MCP bridge enabling Claude AI to securely access SyftBox datasites with proper permissions
+author: mtprewitt@gmail.com
+author_name: Matthew Prewitt
+license: Unlicensed
+homepage: https://github.com/matthewprewitt/datasite-connector
+
+# SyftBox App Configuration
+app_type: compute
+runtime: python:3.12
+
+# Permissions requested by this app
+permissions_requested:
+  read:
+    - "datasites/*/private/**"  # Request read access to private folders
+    - "datasites/*/public/**"   # Request read access to public folders
+  write:
+    - "datasites/*/public/mcp_results/**"  # Write results to public if needed
+  admin: []
+
+# Compute capabilities
+compute:
+  # This app acts as a bridge, not a traditional compute app
+  mode: service
+  
+  # Input/output specifications
+  inputs:
+    - name: query
+      type: string
+      description: MCP query from Claude
+    - name: user_identity
+      type: string
+      description: Authenticated user making the request
+  
+  outputs:
+    - name: response
+      type: json
+      description: MCP-formatted response for Claude
+
+# Privacy and security
+privacy:
+  differential_privacy: true
+  epsilon: 1.0
+  data_minimization: true
+  audit_logging: true
+
+# App metadata
+metadata:
+  category: integration
+  tags:
+    - mcp
+    - claude
+    - ai-assistant
+    - data-access
+  
+  # App icon (optional)
+  icon: 🔌
+  
+  # Detailed description for users
+  long_description: |
+    DataSite Connector MCP enables Claude AI to securely access your SyftBox datasite
+    through the Model Context Protocol (MCP). It provides:
+    
+    - Secure authentication and authorization
+    - Granular permission control via SyftBox's native system
+    - Privacy-preserving data access
+    - Full audit trail of all data access
+    
+    Once approved, Claude can help you analyze and work with your private data
+    while maintaining complete data sovereignty.
+
+# Installation hooks
+hooks:
+  post_install: |
+    echo "DataSite Connector MCP installed successfully!"
+    echo "Configure Claude to connect to: http://localhost:8082/sse"
+  
+  pre_uninstall: |
+    echo "Removing DataSite Connector MCP..."
+
+# Dependencies
+dependencies:
+  python:
+    - syftbox>=0.4.0
+    - fastapi
+    - uvicorn
+    - pydantic
+    - cryptography
+    - pyjwt
+  
+  system: []
+
+# Environment variables
+environment:
+  DATASITE_CONNECTOR_PORT: "8082"
+  DATASITE_CONNECTOR_HOST: "0.0.0.0"
+  ENABLE_AUDIT_LOG: "true"

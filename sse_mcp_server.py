@@ -47,11 +47,22 @@ async def initialize_components():
         access_control = AccessControlSystem(config)
         await access_control.initialize()
         
+        # Initialize SyftBox App integration
+        from src.syftbox_app import SyftBoxApp
+        syftbox_app = SyftBoxApp()
+        app_initialized = await syftbox_app.initialize()
+        if app_initialized:
+            logger.info("SyftBox App integration initialized successfully")
+        else:
+            logger.warning("SyftBox App integration failed to initialize - using fallback mode")
+            syftbox_app = None
+        
         app_components.update({
             'config': config,
             'datasite_manager': datasite_manager,
             'content_repo': content_repo,
-            'access_control': access_control
+            'access_control': access_control,
+            'syftbox_app': syftbox_app
         })
         
         logger.info("DataSite components initialized successfully")
@@ -86,7 +97,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="list_datasets",
-            description="List all available datasets in the datasite",
+            description="List all available datasets in the datasite. Use either access_token (legacy) or user_email (SyftBox App) for private content.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -94,6 +105,18 @@ async def list_tools() -> list[types.Tool]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Optional: Filter datasets by tags"
+                    },
+                    "access_token": {
+                        "type": "string",
+                        "description": "Optional: JWT token for accessing private SyftBox content (legacy mode)"
+                    },
+                    "user_email": {
+                        "type": "string",
+                        "description": "Optional: User email for SyftBox App authentication"
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Optional: Existing SyftBox App session ID"
                     }
                 },
                 "additionalProperties": False
@@ -101,13 +124,25 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_content",
-            description="Retrieve content from a specific dataset",
+            description="Retrieve content from a specific dataset. Use either access_token (legacy) or user_email (SyftBox App) for private content.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "dataset_name": {
                         "type": "string",
                         "description": "Name of the dataset to retrieve"
+                    },
+                    "access_token": {
+                        "type": "string",
+                        "description": "Optional: JWT token for accessing private SyftBox content (legacy mode)"
+                    },
+                    "user_email": {
+                        "type": "string",
+                        "description": "Optional: User email for SyftBox App authentication"
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Optional: Existing SyftBox App session ID"
                     }
                 },
                 "required": ["dataset_name"],
@@ -116,13 +151,25 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="search_content",
-            description="Search for content across all datasets",
+            description="Search for content across all datasets. Use either access_token (legacy) or user_email (SyftBox App) for private content.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
                         "description": "Search query"
+                    },
+                    "access_token": {
+                        "type": "string",
+                        "description": "Optional: JWT token for accessing private SyftBox content (legacy mode)"
+                    },
+                    "user_email": {
+                        "type": "string",
+                        "description": "Optional: User email for SyftBox App authentication"
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Optional: Existing SyftBox App session ID"
                     }
                 },
                 "required": ["query"],
@@ -199,6 +246,32 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                                 })
                     else:
                         logger.warning(f"Public path does not exist: {public_path}")
+                    
+                    # Also check private folder if access is requested and authorized
+                    has_private_access, session_info = await _get_session_for_private_access(arguments, user_datasite_path)
+                    if has_private_access:
+                        try:
+                            private_path = user_datasite_path / "private"
+                            logger.info(f"Checking private path: {private_path} with {session_info}")
+                            if private_path.exists():
+                                logger.info(f"Private folder access granted, scanning files...")
+                                for file_path in private_path.iterdir():
+                                    if file_path.is_file() and file_path.name != "syft.pub.yaml":
+                                        logger.info(f"Found SyftBox private file: {file_path.name}")
+                                        dataset_list.append({
+                                            "name": file_path.name,
+                                            "description": f"Private file from SyftBox datasite: {file_path.name}",
+                                            "content_type": "text/plain",
+                                            "size": file_path.stat().st_size,
+                                            "tags": ["syftbox", "private", "protected"],
+                                            "source": "syftbox_private"
+                                        })
+                            else:
+                                logger.info(f"Private path does not exist: {private_path}")
+                        except Exception as e:
+                            logger.error(f"Error checking private folder: {e}")
+                    else:
+                        logger.info("Private folder access denied - no valid authentication provided")
                 else:
                     logger.warning("No user datasite path found")
             
@@ -225,9 +298,23 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                             try:
                                 with open(file_path, 'rb') as f:
                                     content = f.read()
-                                logger.info(f"Found content in SyftBox datasite: {dataset_name}")
+                                logger.info(f"Found content in SyftBox public datasite: {dataset_name}")
                             except Exception as e:
                                 logger.error(f"Error reading SyftBox file {dataset_name}: {e}")
+                        
+                        # If not found in public, check private folder with permission
+                        if not content:
+                            has_private_access, session_info = await _get_session_for_private_access(arguments, user_datasite_path)
+                            if has_private_access:
+                                try:
+                                    private_path = user_datasite_path / "private"
+                                    private_file_path = private_path / dataset_name
+                                    if private_file_path.exists() and private_file_path.is_file():
+                                        with open(private_file_path, 'rb') as f:
+                                            content = f.read()
+                                        logger.info(f"Found content in SyftBox private datasite: {dataset_name} (via {session_info})")
+                                except Exception as e:
+                                    logger.error(f"Error reading SyftBox private file {dataset_name}: {e}")
             
             if content:
                 result = {
@@ -254,15 +341,64 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                         if public_path.exists():
                             for file_path in public_path.iterdir():
                                 if file_path.is_file() and file_path.name != "syft.pub.yaml":
-                                    # Simple filename and content search
-                                    if query.lower() in file_path.name.lower():
+                                    # Search filename and content
+                                    match_found = query.lower() in file_path.name.lower()
+                                    match_type = "filename"
+                                    
+                                    if not match_found:
+                                        try:
+                                            with open(file_path, 'r', encoding='utf-8') as f:
+                                                content = f.read()
+                                                if query.lower() in content.lower():
+                                                    match_found = True
+                                                    match_type = "content"
+                                        except (UnicodeDecodeError, IOError):
+                                            # Skip binary or unreadable files
+                                            pass
+                                    
+                                    if match_found:
                                         results.append({
                                             "name": file_path.name,
-                                            "description": f"SyftBox file matching '{query}'",
+                                            "description": f"SyftBox file matching '{query}' in {match_type}",
                                             "content_type": "text/plain",
                                             "tags": ["syftbox", "public"],
                                             "relevance_score": 1.0
                                         })
+                        
+                        # Also search private folder if access is granted
+                        has_private_access, session_info = await _get_session_for_private_access(arguments, user_datasite_path)
+                        if has_private_access:
+                            try:
+                                private_path = user_datasite_path / "private"
+                                if private_path.exists():
+                                    logger.info(f"Searching private folder via {session_info}")
+                                    for file_path in private_path.iterdir():
+                                        if file_path.is_file() and file_path.name != "syft.pub.yaml":
+                                            # Search filename and content
+                                            match_found = query.lower() in file_path.name.lower()
+                                            match_type = "filename"
+                                            
+                                            if not match_found:
+                                                try:
+                                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                                        content = f.read()
+                                                        if query.lower() in content.lower():
+                                                            match_found = True
+                                                            match_type = "content"
+                                                except (UnicodeDecodeError, IOError):
+                                                    # Skip binary or unreadable files
+                                                    pass
+                                            
+                                            if match_found:
+                                                results.append({
+                                                    "name": file_path.name,
+                                                    "description": f"SyftBox private file matching '{query}' in {match_type}",
+                                                    "content_type": "text/plain",
+                                                    "tags": ["syftbox", "private", "protected"],
+                                                    "relevance_score": 1.0
+                                                })
+                            except Exception as e:
+                                logger.error(f"Error searching SyftBox private folder: {e}")
             
             result = {"success": True, "results": results}
         
@@ -515,6 +651,149 @@ async def handle_sse_head():
         "Cache-Control": "no-cache",
         "Connection": "keep-alive"
     })
+
+async def _get_session_for_private_access(arguments: dict, user_datasite_path) -> tuple[bool, Optional[str]]:
+    """
+    Get or create a session for private folder access.
+    
+    Supports both JWT tokens (legacy) and SyftBox App sessions.
+    
+    Returns:
+        tuple[bool, Optional[str]]: (has_access, session_info)
+    """
+    access_token = arguments.get("access_token")
+    user_email = arguments.get("user_email") 
+    session_id = arguments.get("session_id")
+    
+    syftbox_app = app_components.get('syftbox_app')
+    
+    # Try SyftBox App method first (preferred)
+    if syftbox_app and (user_email or session_id):
+        try:
+            # Get or create session
+            if session_id:
+                # Use existing session
+                current_session_id = session_id
+            elif user_email:
+                # Create new session
+                from datetime import datetime
+                client_identifier = f"claude-mcp-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                current_session_id = await syftbox_app.create_session(user_email, client_identifier)
+                logger.info(f"Created new SyftBox App session: {current_session_id}")
+            
+            # Check permission using SyftBox App
+            has_permission = await syftbox_app.check_permission(
+                current_session_id, 
+                user_datasite_path / "private"
+            )
+            
+            if has_permission:
+                return True, f"syftbox_session:{current_session_id}"
+            else:
+                logger.warning("SyftBox App permission check failed")
+                
+        except Exception as e:
+            logger.error(f"SyftBox App authentication failed: {e}")
+    
+    # Fall back to JWT method
+    if access_token:
+        has_jwt_access = await _check_private_folder_access_jwt(access_token, user_datasite_path)
+        if has_jwt_access:
+            return True, f"jwt_token:{access_token[:10]}..."
+    
+    return False, None
+
+async def _check_private_folder_access_jwt(access_token: str, user_datasite_path) -> bool:
+    """Check if the access token has permission to access private SyftBox folder.
+    
+    This uses a hybrid approach:
+    1. JWT tokens for authentication (who is requesting)
+    2. SyftBox native permissions for authorization (what they can access)
+    """
+    try:
+        # First, verify JWT token for authentication
+        access_control = app_components.get('access_control')
+        
+        if not access_control:
+            logger.warning("Access control system not available")
+            return False
+        
+        import jwt
+        
+        try:
+            # Decode the JWT token to get the user info
+            payload = jwt.decode(
+                access_token, 
+                access_control.jwt_secret, 
+                algorithms=["HS256"]
+            )
+            
+            user_email = payload.get("user_email")
+            token_id = payload.get("jti")
+            
+            if not user_email or not token_id:
+                logger.warning("Invalid token: missing user_email or jti")
+                return False
+            
+            # Check if token exists and is active
+            if token_id not in access_control.active_tokens:
+                logger.warning("Token not found in active tokens")
+                return False
+            
+            access_token_obj = access_control.active_tokens[token_id]
+            
+            # Check if token has private access permission
+            if "private" not in access_token_obj.permissions and "*" not in access_token_obj.permissions:
+                logger.warning("Token does not have private access permission")
+                return False
+            
+            # Now use SyftBox native permissions to check actual access
+            from syftbox.lib.permissions import get_computed_permission, PermissionType
+            from pathlib import Path
+            
+            try:
+                # Get the snapshot folder (parent of datasites)
+                snapshot_folder = user_datasite_path.parent.parent  # Go up from datasites/email to datasite root
+                
+                # Calculate relative path from snapshot folder
+                private_folder = user_datasite_path / "private"
+                relative_path = private_folder.relative_to(snapshot_folder)
+                
+                # Check SyftBox permissions
+                computed_perm = get_computed_permission(
+                    snapshot_folder=snapshot_folder,
+                    user_email=user_email,
+                    path=relative_path
+                )
+                
+                # Check if user has at least read permission
+                if computed_perm.permission in [PermissionType.READ, PermissionType.WRITE, PermissionType.ADMIN]:
+                    logger.info(f"SyftBox permission granted for {user_email}: {computed_perm.permission}")
+                    return True
+                else:
+                    logger.warning(f"Insufficient SyftBox permissions for {user_email}: {computed_perm.permission}")
+                    return False
+                    
+            except Exception as e:
+                # If SyftBox permission check fails, fall back to checking ownership
+                logger.warning(f"SyftBox permission check failed: {e}")
+                
+                # Simple ownership check as fallback
+                datasite_email = user_datasite_path.name
+                if user_email == datasite_email:
+                    logger.info(f"Owner access granted for {user_email}")
+                    return True
+                else:
+                    logger.warning(f"User {user_email} is not owner of datasite {datasite_email}")
+                    return False
+            
+        except jwt.InvalidTokenError as e:
+            logger.warning(f"Invalid JWT token: {e}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error checking private folder access: {e}")
+        return False
 
 @app.on_event("startup")
 async def startup_event():
