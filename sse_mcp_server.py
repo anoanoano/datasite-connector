@@ -138,26 +138,97 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         logger.info(f"SSE MCP tool called: {name} with arguments: {arguments}")
         
         content_repo = app_components.get('content_repo')
+        datasite_manager = app_components.get('datasite_manager')
+        config = app_components.get('config')
+        
         if not content_repo:
             raise Exception("Content repository not initialized")
         
         if name == "list_datasets":
-            datasets = await content_repo.list_datasets()
             dataset_list = []
+            
+            # Get datasets from encrypted content repository
+            datasets = await content_repo.list_datasets()
             for dataset_name, metadata in datasets.items():
                 dataset_list.append({
                     "name": metadata.name,
                     "description": metadata.description,
                     "content_type": metadata.content_type,
                     "size": metadata.size,
-                    "tags": metadata.tags
+                    "tags": metadata.tags,
+                    "source": "encrypted_repo"
                 })
+            
+            # Also scan SyftBox datasite public directory for files
+            if config:
+                syftbox_datasite_path = config.syftbox_datasite_path.expanduser().resolve()
+                logger.info(f"Scanning SyftBox datasite path: {syftbox_datasite_path}")
+                user_datasite_path = None
+                
+                # Find user's datasite directory
+                datasites_path = syftbox_datasite_path / "datasites"
+                logger.info(f"Looking for datasites in: {datasites_path}")
+                if datasites_path.exists():
+                    logger.info(f"Datasites path exists, looking for mtprewitt@gmail.com...")
+                    user_datasite_path = datasites_path / "mtprewitt@gmail.com"
+                    if user_datasite_path.exists():
+                        logger.info(f"Found target user datasite: {user_datasite_path}")
+                    else:
+                        logger.warning(f"Target user datasite not found: {user_datasite_path}")
+                        user_datasite_path = None
+                else:
+                    logger.warning(f"Datasites path does not exist: {datasites_path}")
+                    user_datasite_path = None
+                
+                if user_datasite_path:
+                    public_path = user_datasite_path / "public"
+                    logger.info(f"Checking public path: {public_path}")
+                    if public_path.exists():
+                        logger.info(f"Public path exists, scanning files...")
+                        for file_path in public_path.iterdir():
+                            if file_path.is_file() and file_path.name != "syft.pub.yaml":
+                                logger.info(f"Found SyftBox file: {file_path.name}")
+                                # Add SyftBox files to dataset list
+                                dataset_list.append({
+                                    "name": file_path.name,
+                                    "description": f"File from SyftBox datasite: {file_path.name}",
+                                    "content_type": "text/plain",
+                                    "size": file_path.stat().st_size,
+                                    "tags": ["syftbox", "public"],
+                                    "source": "syftbox_datasite"
+                                })
+                    else:
+                        logger.warning(f"Public path does not exist: {public_path}")
+                else:
+                    logger.warning("No user datasite path found")
             
             result = {"success": True, "datasets": dataset_list}
         
         elif name == "get_content":
             dataset_name = arguments["dataset_name"]
+            content = None
+            
+            # First try encrypted content repository
             content = await content_repo.get_content(dataset_name)
+            
+            # If not found, try SyftBox datasite
+            if not content and config:
+                syftbox_datasite_path = config.syftbox_datasite_path.expanduser().resolve()
+                datasites_path = syftbox_datasite_path / "datasites"
+                
+                if datasites_path.exists():
+                    user_datasite_path = datasites_path / "mtprewitt@gmail.com"
+                    if user_datasite_path.exists():
+                        public_path = user_datasite_path / "public"
+                        file_path = public_path / dataset_name
+                        if file_path.exists() and file_path.is_file():
+                            try:
+                                with open(file_path, 'rb') as f:
+                                    content = f.read()
+                                logger.info(f"Found content in SyftBox datasite: {dataset_name}")
+                            except Exception as e:
+                                logger.error(f"Error reading SyftBox file {dataset_name}: {e}")
+            
             if content:
                 result = {
                     "success": True,
@@ -170,6 +241,29 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         elif name == "search_content":
             query = arguments["query"]
             results = await content_repo.search_content(query=query)
+            
+            # Also search in SyftBox datasite files
+            if config:
+                syftbox_datasite_path = config.syftbox_datasite_path.expanduser().resolve()
+                datasites_path = syftbox_datasite_path / "datasites"
+                
+                if datasites_path.exists():
+                    user_datasite_path = datasites_path / "mtprewitt@gmail.com"
+                    if user_datasite_path.exists():
+                        public_path = user_datasite_path / "public"
+                        if public_path.exists():
+                            for file_path in public_path.iterdir():
+                                if file_path.is_file() and file_path.name != "syft.pub.yaml":
+                                    # Simple filename and content search
+                                    if query.lower() in file_path.name.lower():
+                                        results.append({
+                                            "name": file_path.name,
+                                            "description": f"SyftBox file matching '{query}'",
+                                            "content_type": "text/plain",
+                                            "tags": ["syftbox", "public"],
+                                            "relevance_score": 1.0
+                                        })
+            
             result = {"success": True, "results": results}
         
         else:
@@ -373,7 +467,8 @@ async def handle_message_post(request: Request):
             await session.send_message(error_response)
         
         # Return 204 No Content for POST /messages
-        return JSONResponse(content={}, status_code=204)
+        from fastapi import Response
+        return Response(status_code=204)
         
     except Exception as e:
         logger.error(f"Error handling POST message: {e}")
