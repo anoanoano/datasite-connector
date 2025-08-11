@@ -1,240 +1,238 @@
 # DataSite Connector
 
-A SyftBox-based application that enables privacy-preserving sharing of proprietary content through Claude MCP (Model Context Protocol) connectors.
+A dual-source MCP (Model Context Protocol) server that enables Claude to securely access both encrypted private content and SyftBox datasite files.
 
 ## Overview
 
-DataSite Connector allows you to:
-- Set up a private datasite using OpenMined SyftBox
-- Securely store proprietary content with end-to-end encryption
-- Share content with Claude through MCP connectors while maintaining privacy
-- Control access with granular permissions and audit trails
-- Apply differential privacy techniques for additional protection
+DataSite Connector provides Claude with secure access to:
+- **Encrypted Private Content** - Locally stored, encrypted files with privacy protection
+- **SyftBox Datasite Files** - Public files from your personal SyftBox datasite network
+- **Privacy-Preserving Access** - Differential privacy and access controls for sensitive content
 
 ## Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Claude AI     │    │  MCP Connector   │    │  SyftBox        │
-│                 │◄──►│                  │◄──►│  DataSite       │
-│  - Queries      │    │  - Authentication│    │                 │
-│  - Analysis     │    │  - Privacy       │    │  - Private      │
-│  - Insights     │    │  - Rate Limiting │    │    Content      │
-└─────────────────┘    └──────────────────┘    │  - Encryption   │
-                                               │  - Access Ctrl  │
-                                               └─────────────────┘
+│   Claude AI     │    │  MCP Server      │    │  Data Sources   │
+│                 │◄──►│  (SSE Protocol)  │◄──►│                 │
+│  - list_datasets│    │                  │    │  • Encrypted    │
+│  - get_content  │    │  - Authentication│    │    Repository   │
+│  - search_content│    │  - Privacy       │    │  • SyftBox      │
+└─────────────────┘    │  - Dual Sources  │    │    Datasite     │
+                       └──────────────────┘    └─────────────────┘
 ```
 
-### Core Components
+## Key Features
 
-1. **DataSite Manager** - SyftBox integration and datasite management
-2. **Content Repository** - Encrypted storage and retrieval of proprietary content
-3. **MCP Server** - Claude Model Context Protocol server implementation
-4. **Access Control System** - Authentication, authorization, and audit logging
+- **Dual-Source Access**: Serves content from both encrypted storage and SyftBox datasites
+- **SSE MCP Protocol**: Uses Server-Sent Events for real-time Claude integration
+- **Privacy Protection**: Differential privacy and encryption for sensitive content
+- **Access Control**: JWT-based authentication and rate limiting
+- **Real-time Connectivity**: Ngrok tunnel support for Claude browser integration
 
 ## Installation
 
 ### Prerequisites
 
 - Python 3.12+
-- SyftBox installation
-- Claude MCP support
+- SyftBox installation and personal datasite
+- Virtual environment recommended
 
 ### Setup
 
-1. Clone this repository:
+1. **Clone and setup**:
 ```bash
-git clone https://github.com/anoanoano/datasite-connector.git
+git clone https://github.com/your-repo/datasite-connector.git
 cd datasite-connector
-```
-
-2. Install dependencies:
-```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Configure SyftBox (if not already done):
+2. **Configure paths**:
+The system expects:
+- SyftBox datasite at `~/datasite/datasites/youremail@domain.com/public/`
+- Encrypted content in `./private_content/`
+- Configuration in `config.yaml`
+
+3. **Run the server**:
 ```bash
-# Follow SyftBox installation guide
-curl -LsSf https://syftbox.openmined.org/install.sh | sh
+source venv/bin/activate
+python sse_mcp_server.py
 ```
 
-4. Run the application:
+4. **Optional - Public access via ngrok**:
 ```bash
-./run.sh
+ngrok http 8082
+# Use the provided https URL in Claude MCP settings
 ```
 
 ## Configuration
 
-Create a `config.yaml` file to customize settings:
-
-```yaml
-# SyftBox settings
-syftbox_datasite_path: "~/datasite"
-
-# Content repository
-content_storage_path: "./private_content"
-encryption_key_path: "./keys/content.key"
-
-# MCP server
-mcp_server_host: "localhost"
-mcp_server_port: 8080
-mcp_server_name: "datasite-connector"
-
-# Privacy settings
-enable_differential_privacy: true
-privacy_epsilon: 1.0
-
-# Access control
-auth_token_expiry: 3600
-max_requests_per_minute: 60
-```
-
-## Usage
-
-### Adding Content
+The system uses `src/config.py` for settings:
 
 ```python
-from src.datasite_manager import DataSiteManager
-from src.config import Config
-
-config = Config()
-manager = DataSiteManager(config)
-
-# Add proprietary content
-await manager.add_content(
-    name="my_dataset",
-    content=file_content,
-    content_type="text/plain",
-    description="My proprietary dataset",
-    tags=["private", "research"]
-)
+# Key settings in Config class:
+syftbox_datasite_path: Path = Path.home() / "datasite"  # Your SyftBox path
+content_storage_path: Path = Path("./private_content")   # Encrypted content
+encryption_key_path: Path = Path("./keys/content.key")   # Encryption key
+enable_differential_privacy: bool = True                 # Privacy protection
 ```
 
-### Creating Access Tokens
+## MCP Tools Available to Claude
 
-```python
-from src.access_control import AccessControlSystem
+### `list_datasets`
+Lists all available datasets from both sources:
+- Encrypted private content (with metadata)
+- SyftBox public files (from your personal datasite only)
 
-access_control = AccessControlSystem(config)
+### `get_content` 
+Retrieves specific content by dataset name:
+- First checks encrypted repository
+- Falls back to SyftBox datasite files
 
-# Create token for specific datasets
-token = await access_control.create_access_token(
-    user_email="user@example.com",
-    datasets=["my_dataset"],
-    permissions=["read"]
-)
+### `search_content`
+Searches across all content:
+- Full-text search in encrypted content
+- Filename matching in SyftBox files
+
+## Data Sources
+
+### 1. Encrypted Repository
+- **Location**: `./private_content/`
+- **Format**: JSON files with encrypted content and metadata
+- **Features**: Differential privacy, access control, audit logging
+- **Use case**: Sensitive proprietary content
+
+### 2. SyftBox Datasite
+- **Location**: `~/datasite/datasites/youremail@domain.com/public/`
+- **Format**: Raw files (text, markdown, etc.)
+- **Features**: Direct file access, public sharing ready
+- **Use case**: Shareable research, documentation, public datasets
+
+## Usage with Claude
+
+1. **Start the server**:
+```bash
+python sse_mcp_server.py
 ```
 
-### Claude MCP Integration
-
-Once running, Claude can access your content through the MCP interface:
-
-```python
-# Claude can call these tools:
-# - list_datasets: Get available datasets
-# - get_content: Retrieve specific content
-# - search_content: Search across content
-# - get_content_summary: Get privacy-preserving summaries
+2. **Connect Claude** (via MCP settings):
+```json
+{
+  "mcpServers": {
+    "datasite-connector": {
+      "command": "curl",
+      "args": ["-N", "https://your-ngrok-url.ngrok-free.app/sse"]
+    }
+  }
+}
 ```
 
-## Privacy Features
+3. **Claude can now**:
+- List all your datasets: `list_datasets`
+- Read specific content: `get_content("filename")`
+- Search across content: `search_content("query")`
+
+## Project Structure
+
+```
+datasite-connector/
+├── sse_mcp_server.py          # Main SSE MCP server
+├── requirements.txt           # Python dependencies  
+├── config.yaml               # Configuration overrides
+├── src/
+│   ├── config.py             # Configuration management
+│   ├── datasite_manager.py   # SyftBox integration
+│   ├── content_repository.py # Encrypted content handling
+│   └── access_control.py     # Authentication & privacy
+├── private_content/          # Encrypted content storage
+├── keys/                     # Encryption keys (auto-generated)
+└── venv/                     # Virtual environment
+```
+
+## Privacy & Security
 
 ### Data Sovereignty
 - All data remains on your local system
-- No data leaves your datasite without explicit permission
-- Full control over who can access what content
+- No data transmitted without explicit access
+- Full control over content exposure
 
 ### Encryption
-- End-to-end encryption of all proprietary content
-- Secure key management with restricted file permissions
+- AES encryption for private content
+- Secure key generation and storage
 - Content integrity verification
 
 ### Differential Privacy
-- Optional noise addition to protect individual data points
-- Configurable privacy parameters (epsilon)
-- Privacy-preserving summaries and statistics
+- Optional noise injection for statistical privacy
+- Configurable epsilon parameters
+- Privacy-preserving content summaries
 
 ### Access Control
-- JWT-based authentication tokens
-- Granular permissions per dataset
+- JWT-based authentication
 - Rate limiting and usage tracking
 - Comprehensive audit logging
 
 ## Development
 
-### Project Structure
-
-```
-datasite-connector/
-├── main.py                 # Main application entry point
-├── run.sh                  # SyftBox app runner script
-├── requirements.txt        # Python dependencies
-├── config.yaml            # Configuration file
-├── src/
-│   ├── __init__.py
-│   ├── config.py          # Configuration management
-│   ├── datasite_manager.py # SyftBox integration
-│   ├── content_repository.py # Content storage
-│   ├── mcp_server.py      # MCP server implementation
-│   └── access_control.py   # Authentication & authorization
-├── tests/                 # Test files
-├── keys/                  # Encryption keys (auto-generated)
-├── data/                  # Persistent data storage
-└── dummy/                 # Temporary files
-```
-
-### Running Tests
-
+### Running the Server
 ```bash
-pytest tests/
+# Development mode
+source venv/bin/activate
+python sse_mcp_server.py
+
+# The server runs on http://0.0.0.0:8082
+# Use ngrok for public access if needed
 ```
 
-### Code Style
+### Adding Content
 
+**Encrypted Content** (programmatically):
+```python
+from src.content_repository import ContentRepository
+from src.config import Config
+
+config = Config()
+repo = ContentRepository(config)
+await repo.store_content("dataset_name", content_bytes, metadata)
+```
+
+**SyftBox Content** (direct file placement):
 ```bash
-# Format code
-black src/ tests/
-
-# Check style
-flake8 src/ tests/
-
-# Type checking
-mypy src/
+# Place files directly in your SyftBox public directory
+cp myfile.txt ~/datasite/datasites/youremail@domain.com/public/
 ```
 
-## Security Considerations
+## Troubleshooting
 
-- Keep encryption keys secure and backed up
-- Regularly rotate access tokens
-- Monitor audit logs for suspicious activity
-- Use strong authentication for token creation
-- Keep the system updated with security patches
+### Common Issues
 
-## Contributing
+1. **"Datasites path does not exist"**
+   - Check SyftBox installation and your email directory exists
+   - Verify path: `~/datasite/datasites/youremail@domain.com/`
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
+2. **"Connection refused"**
+   - Ensure server is running on port 8082
+   - Check firewall settings
+   - Use ngrok for external access
+
+3. **"No datasets found"**
+   - Add content to `./private_content/` or SyftBox public directory
+   - Check file permissions and encryption keys
+
+### Debug Mode
+Enable debug logging in `src/config.py`:
+```python
+debug_mode: bool = True
+log_level: str = "DEBUG"
+```
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is not yet licensed.
 
 ## Support
 
-For questions and support:
-- Create an issue on GitHub
-- Check the SyftBox documentation
-- Review the Claude MCP documentation
-
-## Roadmap
-
-- [ ] Web UI for content management
-- [ ] Advanced privacy-preserving analytics
-- [ ] Multi-user collaboration features
-- [ ] Integration with more MCP clients
-- [ ] Federated learning capabilities
-- [ ] Mobile app support
+- Issues: Create GitHub issues for bugs and feature requests
+- SyftBox: Check [SyftBox documentation](https://syftbox.openmined.org/)
+- MCP: Review [Claude MCP documentation](https://docs.anthropic.com/en/docs/build-with-claude/mcp)
